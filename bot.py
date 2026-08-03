@@ -22,7 +22,7 @@ PREFIX = ","
 # DATABASE
 # =========================
 
-db = sqlite3.connect("bot.db")
+db = sqlite3.connect("/app/data/bot.db")
 
 cursor = db.cursor()
 
