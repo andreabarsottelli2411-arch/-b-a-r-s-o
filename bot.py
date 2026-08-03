@@ -1084,6 +1084,7 @@ async def whitelist(ctx):
 
 
 @whitelist.command()
+@admin_only()
 async def add(ctx, website):
 
     website = website.lower()
@@ -1112,6 +1113,7 @@ async def add(ctx, website):
 
 
 @whitelist.command()
+@admin_only()
 async def remove(ctx, website):
 
     website = website.lower()
@@ -1140,6 +1142,7 @@ async def remove(ctx, website):
 
 
 @whitelist.command()
+@admin_only()
 async def list(ctx):
 
 
@@ -1178,6 +1181,7 @@ async def blacklist(ctx):
 
 
 @blacklist.command()
+@admin_only()
 async def add(ctx, word):
 
     word = word.lower()
@@ -1206,6 +1210,7 @@ async def add(ctx, word):
 
 
 @blacklist.command()
+@admin_only()
 async def remove(ctx, word):
 
     word = word.lower()
@@ -1234,6 +1239,7 @@ async def remove(ctx, word):
 
 
 @blacklist.command()
+@admin_only()
 async def list(ctx):
 
 
