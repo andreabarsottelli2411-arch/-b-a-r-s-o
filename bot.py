@@ -674,3 +674,5 @@ async def on_command_error(ctx, error):
         await ctx.send(
             f"❌ Command failed:\n`{error}`"
         )
+
+bot.run(TOKEN)
