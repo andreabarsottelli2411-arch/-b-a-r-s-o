@@ -1,33 +1,47 @@
 import discord
 from discord.ext import commands
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 import re
-from datetime import datetime, timezone
+import os
+import time
 
 
 # =========================
 # CONFIGURATION
 # =========================
 
-import os
-
 TOKEN = os.getenv("TOKEN")
 
-# Channels where self-promo links are forbidden
+PREFIX = ","
+
+SERVER_ID = 1469436868239298624
+
+# Channels
 MONITORED_CHANNELS = {
     1469657626785615943,
     1528513613562642512,
     1469436868998332480
 }
 
-# Mod log channel
 LOG_CHANNEL_ID = 1533593701312495756
-
-# Self promo channel
 SELF_PROMO_CHANNEL_ID = 1469661038055002112
 
-# Timeout duration
-TIMEOUT_DURATION = timedelta(days=7)
+
+# Warning roles
+
+WARNING_ROLES = {
+    1: 1533657085538209822,
+    2: 1533657126629539993,
+    3: 1533657139975819274
+}
+
+
+# Allowed links
+
+WHITELIST = {
+    "medal.tv",
+    "tenor.com"
+}
 
 
 # =========================
@@ -35,13 +49,18 @@ TIMEOUT_DURATION = timedelta(days=7)
 # =========================
 
 intents = discord.Intents.default()
+
 intents.message_content = True
 intents.members = True
 
+
 bot = commands.Bot(
-    command_prefix="!",
+    command_prefix=PREFIX,
     intents=intents
 )
+
+
+start_time = time.time()
 
 
 # =========================
@@ -51,171 +70,606 @@ bot = commands.Bot(
 LINK_REGEX = re.compile(
     r"""
     (
-        https?://\S+
-        |
-        www\.\S+
-        |
-        \b[a-zA-Z0-9-]+\.(com|net|org|gg|tv|io|co|me|xyz)\b\S*
+    https?://\S+
+    |
+    www\.\S+
+    |
+    \b[a-zA-Z0-9-]+\.(com|net|org|gg|tv|io|co|me|xyz)\S*
     )
     """,
     re.VERBOSE | re.IGNORECASE
 )
 
 
-# Allowed websites
-ALLOWED_DOMAINS = [
-    "medal.tv",
-    "tenor.com"
-]
+def contains_bad_link(content):
 
-
-def contains_forbidden_link(message):
-    """
-    Returns True if message contains a link
-    except allowed websites.
-    """
-
-    links = LINK_REGEX.findall(message.content)
+    links = LINK_REGEX.findall(content)
 
     if not links:
         return False
 
-    content = message.content.lower()
+    content = content.lower()
 
-    for allowed in ALLOWED_DOMAINS:
+
+    for allowed in WHITELIST:
         if allowed in content:
             return False
+
 
     return True
 
 
+
 # =========================
-# READY EVENT
+# READY
 # =========================
 
 @bot.event
 async def on_ready():
-    print("--------------------------------")
+
+    print("-------------------------")
     print(f"Logged in as {bot.user}")
-    print(f"Bot ID: {bot.user.id}")
-    print("--------------------------------")
+    print("Version 2.0 Online")
+    print("-------------------------")
+
+
+    channel = bot.get_channel(LOG_CHANNEL_ID)
+
+    if channel:
+
+        embed = discord.Embed(
+            title="🟢 Bot Online",
+            description="Self Promo Protection is running.",
+            color=discord.Color.green(),
+            timestamp=datetime.now(timezone.utc)
+        )
+
+
+        embed.add_field(
+            name="Latency",
+            value=f"{round(bot.latency * 1000)}ms"
+        )
+
+
+        embed.add_field(
+            name="Servers",
+            value=str(len(bot.guilds))
+        )
+
+
+        await channel.send(embed=embed)
+
 
 
 # =========================
-# MESSAGE CHECK
+# ADMIN CHECK
+# =========================
+
+def is_admin():
+
+    async def predicate(ctx):
+
+        if ctx.author.guild_permissions.administrator:
+            return True
+
+        await ctx.send(
+            "❌ You need Administrator permission to use this command."
+        )
+
+        return False
+
+
+    return commands.check(predicate)
+
+
+
+# =========================
+# LOGGING FUNCTION
+# =========================
+
+async def send_log(
+    title,
+    description,
+    color=discord.Color.red()
+):
+
+    channel = bot.get_channel(LOG_CHANNEL_ID)
+
+    if channel:
+
+        embed = discord.Embed(
+            title=title,
+            description=description,
+            color=color,
+            timestamp=datetime.now(timezone.utc)
+        )
+
+        await channel.send(embed=embed)
+
+
+
+# =========================
+# MESSAGE PROTECTION
 # =========================
 
 @bot.event
 async def on_message(message):
 
-    # Ignore bots
     if message.author.bot:
         return
 
 
-    # Only check selected channels
     if message.channel.id in MONITORED_CHANNELS:
 
 
-        # Ignore administrators
-        if message.author.guild_permissions.administrator:
-            return
+        if not message.author.guild_permissions.administrator:
 
 
-        # Check links
-        if contains_forbidden_link(message):
+            if contains_bad_link(message.content):
 
-            try:
+                try:
 
-                # Save message content before deleting
-                deleted_content = message.content
+                    content = message.content
 
 
-                # Delete message
-                await message.delete()
+                    await message.delete()
 
 
-                # Timeout user
-                await message.author.timeout(
-                    TIMEOUT_DURATION,
-                    reason="Self-promotion/link posted outside self-promo channel"
-                )
-
-
-                # Send log
-                log_channel = bot.get_channel(LOG_CHANNEL_ID)
-
-                if log_channel:
-
-                    embed = discord.Embed(
-                        title="🔨 User Timed Out",
-                        color=discord.Color.red(),
-                        timestamp=datetime.now(timezone.utc)
-                    )
-
-                    embed.add_field(
-                        name="User",
-                        value=f"{message.author.mention}\n`{message.author.id}`",
-                        inline=False
-                    )
-
-                    embed.add_field(
-                        name="Channel",
-                        value=message.channel.mention,
-                        inline=False
-                    )
-
-                    embed.add_field(
-                        name="Reason",
-                        value=(
-                            "Posted self-promotion outside the self-promo channel.\n"
-                            f"Timeout: **7 days**\n"
-                            f"Please use <#{SELF_PROMO_CHANNEL_ID}> instead."
-                        ),
-                        inline=False
-                    )
-
-                    embed.add_field(
-                        name="Deleted Message",
-                        value=(
-                            deleted_content[:1024]
-                            if deleted_content
-                            else "No text content"
-                        ),
-                        inline=False
+                    await message.author.timeout(
+                        timedelta(days=7),
+                        reason="Self promotion link"
                     )
 
 
-                    embed.set_footer(
-                        text="Self Promo Protection"
+                    await send_log(
+                        "🔨 Automatic Timeout",
+                        f"""
+User:
+{message.author.mention}
+
+Channel:
+{message.channel.mention}
+
+Reason:
+Self promotion/link outside self-promo
+
+Punishment:
+7 day timeout
+
+Deleted message:
+{content[:1000]}
+"""
                     )
 
-                    await log_channel.send(
-                        embed=embed
-                    )
 
+                except Exception as e:
 
-            except discord.Forbidden:
-
-                print(
-                    f"Could not moderate {message.author}. "
-                    "Check bot permissions/role position."
-                )
-
-
-            except Exception as e:
-
-                print(
-                    f"Error: {e}"
-                )
+                    print(e)
 
 
     await bot.process_commands(message)
 
+# =========================
+# WARNING SYSTEM HELPERS
+# =========================
+
+async def get_warning_level(member):
+
+    for level, role_id in WARNING_ROLES.items():
+
+        role = member.guild.get_role(role_id)
+
+        if role in member.roles:
+            return level
+
+    return 0
+
+
+
+async def remove_warning_roles(member):
+
+    roles_to_remove = []
+
+    for role_id in WARNING_ROLES.values():
+
+        role = member.guild.get_role(role_id)
+
+        if role and role in member.roles:
+            roles_to_remove.append(role)
+
+
+    if roles_to_remove:
+        await member.remove_roles(*roles_to_remove)
+
+
+
+async def apply_warning(member, level):
+
+    await remove_warning_roles(member)
+
+    role = member.guild.get_role(
+        WARNING_ROLES[level]
+    )
+
+    if role:
+        await member.add_roles(role)
+
 
 
 # =========================
-# START BOT
+# HELP COMMAND
 # =========================
 
-bot.run(TOKEN)
+@bot.command(name="help")
+@is_admin()
+async def help_command(ctx):
+
+    embed = discord.Embed(
+        title="🤖 Self Promo Bot Commands",
+        color=discord.Color.blue()
+    )
+
+    embed.description = """
+
+`,warn @user <reason>`
+→ Give a warning and punishment.
+
+`,warnings @user`
+→ Check warning level.
+
+`,clearwarnings @user`
+→ Remove warning roles.
+
+`,unmute @user`
+→ Remove timeout.
+
+`,whitelist add <domain>`
+→ Allow a website.
+
+`,whitelist remove <domain>`
+→ Remove a website.
+
+`,whitelist list`
+→ Show allowed websites.
+
+`,botstatus`
+→ Show bot information.
+
+"""
+
+    await ctx.send(embed=embed)
+
+
+
+# =========================
+# WARN COMMAND
+# =========================
+
+@bot.command()
+@is_admin()
+async def warn(ctx, member: discord.Member, *, reason):
+
+    try:
+
+        current = await get_warning_level(member)
+
+        new_warning = current + 1
+
+
+        if new_warning >= 3:
+
+
+            await apply_warning(
+                member,
+                3
+            )
+
+
+            await ctx.send(
+                f"""
+🔨 {member.mention}
+
+You have received your third warning.
+
+Reason:
+{reason}
+
+Punishment:
+**7 day ban**
+"""
+            )
+
+
+            await send_log(
+                "🔨 Third Warning - Ban",
+                f"""
+User:
+{member.mention}
+
+Moderator:
+{ctx.author.mention}
+
+Reason:
+{reason}
+
+Punishment:
+7 day ban
+"""
+            )
+
+
+            await member.ban(
+                reason="Third warning reached",
+                delete_message_days=0
+            )
+
+
+
+        elif new_warning == 2:
+
+
+            await apply_warning(
+                member,
+                2
+            )
+
+
+            await member.timeout(
+                timedelta(days=3),
+                reason=reason
+            )
+
+
+            await ctx.send(
+                f"""
+⚠️ {member.mention}
+
+You have received your second warning.
+
+Reason:
+{reason}
+
+Punishment:
+**3 day timeout**
+
+⚠️ Your next warning will result in a **7 day ban**.
+"""
+            )
+
+
+
+        else:
+
+
+            await apply_warning(
+                member,
+                1
+            )
+
+
+            await member.timeout(
+                timedelta(hours=1),
+                reason=reason
+            )
+
+
+            await ctx.send(
+                f"""
+⚠️ {member.mention}
+
+You have received your first warning.
+
+Reason:
+{reason}
+
+Punishment:
+**1 hour timeout**
+"""
+            )
+
+
+        await send_log(
+            "⚠️ Warning Issued",
+            f"""
+User:
+{member.mention}
+
+Moderator:
+{ctx.author.mention}
+
+Warning:
+{new_warning}/3
+
+Reason:
+{reason}
+"""
+        )
+
+
+
+    except Exception as e:
+
+        await ctx.send(
+            f"❌ Failed to warn user.\nReason:\n`{e}`"
+        )
+
+
+
+# =========================
+# WARNINGS COMMAND
+# =========================
+
+@bot.command()
+@is_admin()
+async def warnings(ctx, member: discord.Member):
+
+    level = await get_warning_level(member)
+
+
+    await ctx.send(
+        f"⚠️ {member.mention} currently has warning level **{level}/3**."
+    )
+
+
+
+# =========================
+# CLEAR WARNINGS
+# =========================
+
+@bot.command()
+@is_admin()
+async def clearwarnings(ctx, member: discord.Member):
+
+    await remove_warning_roles(member)
+
+
+    await ctx.send(
+        f"✅ Cleared all warnings for {member.mention}."
+    )
+
+
+
+# =========================
+# UNMUTE
+# =========================
+
+@bot.command()
+@is_admin()
+async def unmute(ctx, member: discord.Member):
+
+    await member.timeout(
+        None,
+        reason=f"Removed by {ctx.author}"
+    )
+
+
+    await ctx.send(
+        f"✅ Removed timeout from {member.mention}."
+    )
+
+
+
+# =========================
+# WHITELIST COMMAND
+# =========================
+
+@bot.group(
+    invoke_without_command=True
+)
+@is_admin()
+async def whitelist(ctx):
+
+    await ctx.send(
+        "Use:\n`,whitelist add/remove/list`"
+    )
+
+
+
+@whitelist.command()
+async def add(ctx, domain):
+
+    WHITELIST.add(
+        domain.lower()
+    )
+
+
+    await ctx.send(
+        f"✅ Added `{domain}` to whitelist."
+    )
+
+
+
+@whitelist.command()
+async def remove(ctx, domain):
+
+    WHITELIST.discard(
+        domain.lower()
+    )
+
+
+    await ctx.send(
+        f"✅ Removed `{domain}` from whitelist."
+    )
+
+
+
+@whitelist.command()
+async def list(ctx):
+
+    await ctx.send(
+        "✅ Allowed websites:\n" +
+        "\n".join(WHITELIST)
+    )
+
+
+
+# =========================
+# BOT STATUS
+# =========================
+
+@bot.command()
+@is_admin()
+async def botstatus(ctx):
+
+    uptime = int(
+        time.time() - start_time
+    )
+
+    hours = uptime // 3600
+    minutes = (uptime % 3600) // 60
+
+
+    embed = discord.Embed(
+        title="🤖 Bot Status",
+        color=discord.Color.green()
+    )
+
+
+    embed.add_field(
+        name="Latency",
+        value=f"{round(bot.latency * 1000)}ms"
+    )
+
+
+    embed.add_field(
+        name="Uptime",
+        value=f"{hours}h {minutes}m"
+    )
+
+
+    embed.add_field(
+        name="Servers",
+        value=len(bot.guilds)
+    )
+
+
+    await ctx.send(embed=embed)
+
+
+
+# =========================
+# COMMAND ERROR HANDLER
+# =========================
+
+@bot.event
+async def on_command_error(ctx, error):
+
+    if isinstance(error, commands.MissingPermissions):
+
+        await ctx.send(
+            "❌ You do not have permission to use this command."
+        )
+
+
+    elif isinstance(error, commands.MissingRequiredArgument):
+
+        await ctx.send(
+            "❌ Missing argument. Check `,help`."
+        )
+
+
+    else:
+
+        await ctx.send(
+            f"❌ Command failed:\n`{error}`"
+        )
