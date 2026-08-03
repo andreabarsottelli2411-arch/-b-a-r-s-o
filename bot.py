@@ -4,15 +4,44 @@ from datetime import timedelta, datetime, timezone
 import os
 import re
 import time
+import sqlite3
+from dotenv import load_dotenv
 
 
 # =====================================================
 # CONFIGURATION
 # =====================================================
 
+load_dotenv()
+
 TOKEN = os.getenv("TOKEN")
 
 PREFIX = ","
+
+# =========================
+# DATABASE
+# =========================
+
+db = sqlite3.connect("bot.db")
+
+cursor = db.cursor()
+
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS whitelist (
+    domain TEXT UNIQUE
+)
+""")
+
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS blacklist (
+    word TEXT UNIQUE
+)
+""")
+
+
+db.commit()
 
 
 # Server ID
@@ -157,6 +186,37 @@ def get_time():
         timezone.utc
     )
 
+# =====================================================
+# DATABASE LOADER
+# =====================================================
+
+def load_database():
+
+    WHITELIST.clear()
+    BLACKLIST.clear()
+
+
+    # Load whitelist
+
+    cursor.execute(
+        "SELECT domain FROM whitelist"
+    )
+
+    for row in cursor.fetchall():
+
+        WHITELIST.add(row[0])
+
+
+
+    # Load blacklist
+
+    cursor.execute(
+        "SELECT word FROM blacklist"
+    )
+
+    for row in cursor.fetchall():
+
+        BLACKLIST.add(row[0])
 
 
 # =====================================================
@@ -168,9 +228,11 @@ def get_time():
 
 async def on_ready():
 
+    load_database()
+
     print("==========================")
     print(f"Logged in as {bot.user}")
-    print("Bot Version: 3.0")
+    print("Bot Version: 4.0")
     print("==========================")
 
 
@@ -861,6 +923,12 @@ async def help_command(ctx):
 `,botstatus`
 → Show bot information.
 
+`,ban @user reason`
+→ Ban a user
+
+`,unban userID`
+→ Unban a user
+
 """
 
 
@@ -1016,23 +1084,27 @@ async def whitelist(ctx):
 
 
 @whitelist.command()
-async def add(
-    ctx,
-    website
-):
+async def add(ctx, website):
+
+    website = website.lower()
 
 
     WHITELIST.add(
-
-        website.lower()
-
+        website
     )
 
 
+    cursor.execute(
+        "INSERT OR IGNORE INTO whitelist (domain) VALUES (?)",
+        (website,)
+    )
+
+
+    db.commit()
+
+
     await ctx.send(
-
         f"✅ Added `{website}` to whitelist."
-
     )
 
 
@@ -1040,23 +1112,27 @@ async def add(
 
 
 @whitelist.command()
-async def remove(
-    ctx,
-    website
-):
+async def remove(ctx, website):
+
+    website = website.lower()
 
 
     WHITELIST.discard(
-
-        website.lower()
-
+        website
     )
 
 
+    cursor.execute(
+        "DELETE FROM whitelist WHERE domain=?",
+        (website,)
+    )
+
+
+    db.commit()
+
+
     await ctx.send(
-
         f"✅ Removed `{website}` from whitelist."
-
     )
 
 
@@ -1102,23 +1178,27 @@ async def blacklist(ctx):
 
 
 @blacklist.command()
-async def add(
-    ctx,
-    word
-):
+async def add(ctx, word):
+
+    word = word.lower()
 
 
     BLACKLIST.add(
-
-        word.lower()
-
+        word
     )
 
 
+    cursor.execute(
+        "INSERT OR IGNORE INTO blacklist (word) VALUES (?)",
+        (word,)
+    )
+
+
+    db.commit()
+
+
     await ctx.send(
-
         f"🚫 Added `{word}` to blacklist."
-
     )
 
 
@@ -1126,23 +1206,27 @@ async def add(
 
 
 @blacklist.command()
-async def remove(
-    ctx,
-    word
-):
+async def remove(ctx, word):
+
+    word = word.lower()
 
 
     BLACKLIST.discard(
-
-        word.lower()
-
+        word
     )
 
 
+    cursor.execute(
+        "DELETE FROM blacklist WHERE word=?",
+        (word,)
+    )
+
+
+    db.commit()
+
+
     await ctx.send(
-
         f"✅ Removed `{word}` from blacklist."
-
     )
 
 
@@ -1244,6 +1328,59 @@ async def botstatus(ctx):
 
 
 
+@bot.command()
+@admin_only()
+async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
+
+    try:
+
+        await member.ban(
+            reason=f"{reason} | By {ctx.author}"
+        )
+
+        await ctx.send(
+            f"🔨 Banned {member.mention}\nReason: {reason}"
+        )
+
+
+    except Exception as e:
+
+        await ctx.send(
+            f"❌ Failed to ban:\n`{e}`"
+        )
+
+@bot.command()
+@admin_only()
+async def unban(ctx, user_id: int):
+
+    try:
+
+        user = await bot.fetch_user(user_id)
+
+        await ctx.guild.unban(
+            user,
+            reason=f"Unbanned by {ctx.author}"
+        )
+
+
+        await ctx.send(
+            f"✅ Unbanned {user}."
+        )
+
+
+    except discord.NotFound:
+
+        await ctx.send(
+            "❌ User is not banned or ID is incorrect."
+        )
+
+
+    except Exception as e:
+
+        await ctx.send(
+            f"❌ Failed to unban:\n`{e}`"
+        )
+
 
 
 # =====================================================
@@ -1254,42 +1391,35 @@ async def botstatus(ctx):
 @bot.event
 async def on_command_error(ctx, error):
 
+    if isinstance(error, commands.CommandNotFound):
+        return
 
-    if isinstance(
-        error,
-        commands.MissingRequiredArgument
-    ):
 
+    if isinstance(error, commands.MissingRequiredArgument):
 
         await ctx.send(
-
             "❌ Missing argument. Use `,help`."
-
         )
 
 
-
-    elif isinstance(
-        error,
-        commands.MemberNotFound
-    ):
-
+    elif isinstance(error, commands.MemberNotFound):
 
         await ctx.send(
-
             "❌ User not found."
-
         )
 
+
+    elif isinstance(error, commands.BadArgument):
+
+        await ctx.send(
+            "❌ Invalid argument."
+        )
 
 
     else:
 
-
         await ctx.send(
-
             f"❌ Command failed:\n`{error}`"
-
         )
 
 
