@@ -245,7 +245,7 @@ async def on_ready():
 
             title="🟢 Bot Online",
 
-            description="Self Promo Protection v3.0 is active.",
+            description="v4.0 is active.",
 
             color=discord.Color.green(),
 
